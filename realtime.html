@@ -1,0 +1,250 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title>JavaScript Sample Code</title>
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+    <script src="//code.jquery.com/jquery-2.1.4.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+    <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.13.1/jquery.validate.min.js"></script>
+
+    <style>
+        label.error { color: red; font-weight: normal; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>JavaScript Sample Code</h1>
+        <hr />
+
+        <form id="form" class="form-horizontal">
+            <div class="form-group">
+                <label for="input_file" class="col-sm-2 control-label">Input File</label>
+                <div class="col-sm-10">
+                    <input type="file" class="form-control" id="input_file" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="api_key" class="col-sm-2 control-label">API Key</label>
+                <div class="col-sm-10">
+                    <input type="text" class="form-control" id="api_key" placeholder="API Key" value="2a1bfa86-045b-422f-b0a4-553fbe037f0c" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <div class="col-sm-offset-2 col-sm-10">
+                    <button id="submit" type="submit" class="btn btn-default">Start</button>
+                </div>
+            </div>
+        </form>
+
+        <div class="panel panel-default">
+            <div class="panel-heading">Progress</div>
+            <div class="panel-body">
+                <ul id="progress"></ul>
+            </div>
+        </div>
+        <div class="panel panel-default">
+            <div class="panel-heading">Finish</div>
+            <div class="panel-body">
+                <ul id="finish"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+
+        if (window.File && window.FileReader && window.FileList && window.Blob)
+        {
+            console.log("This browser confirm window.File && window.FileReader !!!");
+        }
+        else
+        {
+            alert('The File APIs are not fully supported in this browser.');
+        }
+
+        options = {
+            url: {
+                tokenUrl: 'https://token.beyondverbal.com/token',
+                serverUrl: 'https://alphav3.beyondverbal.com/v1/recording/'
+               
+            },
+            //url: {
+            //    tokenUrl: 'http://localhost:29020//token',
+            //    serverUrl: 'http://localhost:59553//v1/recording/'
+
+            //},
+            apiKey: $("#api_key").val(),//'1e505f9c-fad0-4db6-b88f-ab26383cda16',
+            token: '',
+            interval: 0,
+        };
+
+        $(function ()
+        {
+            $("#form").validate({
+                submitHandler: function (form)
+                {
+                    $("#submit").attr("disabled", true).text("Analyze...");
+                    $('#progress').html('');
+                    $('#finish').html('');
+                    options.interval = 0;
+
+                    authenticate()
+                        .error(function (jqXHR, textStatus, errorThrown)
+                        {
+                            Show(JSON.stringify(jqXHR) + textStatus + JSON.stringify(errorThrown));
+                        })
+                       .success(function (data)
+                       {
+                           var token = JSON.parse(data);
+                           options.token = token.access_token;
+                           uploadFile(form[0].files[0]);
+                       });
+                }
+            });
+
+        });
+
+        function uploadFile(file)
+        {
+            if (typeof FileReader !== "undefined")
+            {
+                var reader = new FileReader();
+                reader.onload = function (e)
+                {
+                    analyzeFile($("#api_key").val(), e.target.result, 7000)
+                        .done(function (res)
+                        {
+                            $("#submit").attr("disabled", false).text("Start");
+                        })
+                        .fail(function (err)
+                        {
+                            Show(err);
+                            $("#submit").attr("disabled", false).text("Error");
+                        })
+                        .progress(function (p)
+                        {
+                            Show(p);
+                            //console.info("progress:::"+JSON.stringify(p));
+                            //options.interval = p.result.duration;
+                        });
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function authenticate()
+        {
+            console.log('url token:' + options.url.tokenUrl);
+
+            return $.ajax({
+                url: options.url.tokenUrl,
+                type: "POST",
+                dataType: 'text',
+                contentType: 'application/x-www-form-urlencoded',
+                data: {
+                    grant_type: "client_credentials",
+                    apiKey: options.apiKey
+                }
+            });
+
+        }
+
+        function analyzeFile(apiKey, content, interval)
+        {
+            var dfd = $.Deferred();
+            var pTimer = null;
+            var startUrl = options.url.serverUrl+"start";
+
+            console.log('url::' + startUrl + ' token:' + options.token);
+
+            $.ajax({
+                url: startUrl,
+                headers: { 'Authorization': "Bearer " + options.token },
+                type: "POST",
+                //cache: false,
+                data: JSON.stringify({ dataFormat: { type: "WAV" } }),
+                contentType: 'application/x-www-form-urlencoded',
+                dataType: 'text'
+            })
+            .then(function (data)
+            {
+                Show(data);
+
+                var recID = data.recordingId ? data.recordingId : JSON.parse(data).recordingId;
+                console.log('recid::' + recID);
+                var upStreamUrl = options.url.serverUrl + recID;
+                //post content for analysis
+                $.ajax({
+                    url: upStreamUrl,
+                    headers: { 'Authorization': "Bearer " + options.token },
+                    data: content,
+                    contentType: false,
+                    processData: false,
+                    cache: false,
+                    dataType: 'text',
+                    type: "POST"
+                })
+                .fail(dfd.reject).done(function (data)
+                {
+                    ShowFinish(data);
+                });
+
+                //periodically ask for intermediate results
+                pTimer = setInterval(function ()
+                {
+                    var analysisUrl = options.url.serverUrl + recID + '/analysis?fromMs=' + options.interval;
+
+                    $.ajax({
+                        url: analysisUrl,
+                        headers: { 'Authorization': "Bearer " + options.token },
+                        cache: false,
+                        type: "GET"
+                    })
+                    .done(function (ares)
+                    {
+                        dfd.notify(ares);
+
+                        console.info("done:" + JSON.stringify(ares));
+                        try
+                        {
+                            console.info("offset:" + ares.result.analysisSegments[0].offset);
+
+                            if (ares.result.analysisSegments[0].offset)
+                                options.interval = ares.result.analysisSegments[0].offset;
+                        }
+                        catch (err) { }
+                        
+                        
+                        
+                        if (ares.result.sessionStatus == "Done")
+                        {
+                            
+                            if (pTimer)
+                                clearInterval(pTimer);
+                            dfd.resolve();
+                        }
+                    })
+                    .fail(dfd.reject);
+
+                }, interval);
+
+            }, dfd.reject);
+
+            return dfd.promise().always(function ()
+            {
+            });
+        }
+        function Show(json)
+        {
+            $('#progress').append("<li>" + JSON.stringify(json) + "</li>");
+        }
+        function ShowFinish(json)
+        {
+            $('#finish').append("<li>" + JSON.stringify(json) + "</li>");
+        }
+    </script>
+</body>
+</html>

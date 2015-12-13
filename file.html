@@ -1,0 +1,186 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title>JavaScript Sample Code</title>
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+    <script src="//code.jquery.com/jquery-2.1.4.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+    <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.13.1/jquery.validate.min.js"></script>
+
+    <style>
+        label.error { color: red; font-weight: normal; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>JavaScript Sample Code</h1>
+        <hr /> 
+
+        <form id="form" class="form-horizontal">
+            <div class="form-group">
+                <label for="input_file" class="col-sm-2 control-label">Input File</label>
+                <div class="col-sm-10">
+                    <input type="file" class="form-control" id="input_file" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="api_key" class="col-sm-2 control-label">API Key</label>
+                <div class="col-sm-10">
+                    <input type="text" class="form-control" id="api_key" placeholder="API Key" value="2a1bfa86-045b-422f-b0a4-553fbe037f0c" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <div class="col-sm-offset-2 col-sm-10">
+                    <button id="submit" type="submit" class="btn btn-default">Start</button>
+                </div>
+            </div>
+        </form>
+
+        <div class="panel panel-default">
+            <div class="panel-heading">Results</div>
+            <div class="panel-body">
+                <ul id="result"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+
+        if (window.File && window.FileReader && window.FileList && window.Blob)
+        {
+            console.log("This browser confirm window.File && window.FileReader !!!");
+        }
+        else
+        {
+            alert('The File APIs are not fully supported in this browser.');
+        }
+
+        options = {
+            url: {
+                tokenUrl: 'https://token.beyondverbal.com/token',
+                serverUrl: 'https://apiv3.beyondverbal.com/v1/recording/'
+               
+            },
+            apiKey: $("#api_key").val(),
+            token: ''
+
+        };
+
+        $(function ()
+        {
+            $("#form").validate({
+                submitHandler: function (form)
+                {
+                    $("#submit").attr("disabled", true).text("Analyze...");
+                    $('#result').html('');
+
+                    authenticate()
+                        .error(function (jqXHR, textStatus, errorThrown)
+                        {
+                            Show(JSON.stringify(jqXHR) + errorThrown);
+                        })
+                       .success(function (data)
+                       {
+                           console.log('sucess::' + JSON.stringify(data));
+                           var token = JSON.parse(data);
+                           options.token = token.access_token;
+                           uploadFile(form[0].files[0]);
+                       });
+                }
+            });
+
+        });
+
+        function uploadFile(file)
+        {
+            if (typeof FileReader !== "undefined")
+            {
+                var reader = new FileReader();
+                reader.onload = function (e)
+                {
+                    analyzeFile($("#api_key").val(), e.target.result)
+                        .done(function (res)
+                        {
+                            Show(res);
+                            $("#submit").attr("disabled", false).text("Start");
+                        })
+                        .fail(function (err)
+                        {
+                            Show(err);
+                            $("#submit").attr("disabled", false).text("Start");
+                        });
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function authenticate()
+        {
+            console.log('url token:' + options.url.tokenUrl);
+
+            return $.ajax({
+                url: options.url.tokenUrl,
+                type: "POST",
+                dataType: 'text',
+                contentType: 'application/x-www-form-urlencoded',
+                data: {
+                    grant_type: "client_credentials",
+                    apiKey: options.apiKey
+                }
+            });
+
+        }
+
+        function analyzeFile(apiKey, content, interval)
+        {
+            var dfd = $.Deferred();
+            var startUrl = options.url.serverUrl+'start';
+
+            //console.log('url::' + startUrl + ' token:' + options.token);
+
+            $.ajax({
+                url: startUrl,
+                headers: { 'Authorization': "Bearer " + options.token },
+                type: "POST",
+                cache: false,
+                data: JSON.stringify({ dataFormat: { type: "WAV" } }),
+                contentType: 'application/x-www-form-urlencoded',
+                dataType: 'text'
+            })
+            .then(function (data)
+            {
+                Show(data);
+
+                var recID = data.recordingId ? data.recordingId : JSON.parse(data).recordingId;
+                //console.log('recid::' + recID);
+                var upStreamUrl = options.url.serverUrl + recID;
+                //post content for analysis
+                $.ajax({
+                    url: upStreamUrl,
+                    headers: { 'Authorization': "Bearer " + options.token },
+                    data: content,
+                    contentType: false,
+                    processData: false,
+                    cache: false,
+                    dataType: 'text',
+                    type: "POST"
+                })
+                .then(dfd.resolve, dfd.reject);
+
+            }, dfd.reject);
+
+            return dfd.promise().always(function ()
+            {
+            });
+        }
+        function Show(json)
+        {
+            $('#result').append("<li>" + JSON.stringify(json) + "</li>");
+        }
+    </script>
+</body>
+</html>
