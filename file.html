@@ -121,7 +121,7 @@
         function authenticate()
         {
             console.log('url token:' + options.url.tokenUrl);
-
+            options.apiKey = $("#api_key").val();
             return $.ajax({
                 url: options.url.tokenUrl,
                 type: "POST",
